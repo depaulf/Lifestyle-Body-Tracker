@@ -160,22 +160,106 @@ function render() {
       <div style="display:flex;align-items:center;gap:8px" id="nav-wc"></div>
     </div>
     <div class="page-tabs">
-      ${[['week','Week'],['checkin','Check-In'],['stats','Stats'],['adonis','Adonis'],['coach','Coach'],['targets','Targets']].map(([p,l]) =>
+      ${[['week','Week'],['checkin','Check-In'],['backfill','Backfill'],['stats','Stats'],['adonis','Adonis'],['coach','Coach'],['targets','Targets']].map(([p,l]) =>
         `<button class="ptab ${currentPage===p?'active':''}" onclick="switchPage('${p}')">${l}</button>`).join('')}
     </div>
-    ${['week','checkin','stats','adonis','coach','targets'].map(p =>
+    ${['week','checkin','backfill','stats','adonis','coach','targets'].map(p =>
       `<div class="page ${currentPage===p?'active':''}" id="page-${p}"></div>`).join('')}
     <div class="toast" id="toast"></div>`;
   renderWeekControls();
-  ({ week:renderWeekPage, checkin:renderCheckinPage, stats:renderStatsPage, adonis:renderAdonisPage, coach:renderCoachPage, targets:renderTargetsPage })[currentPage]?.();
+  ({ week:renderWeekPage, checkin:renderCheckinPage, backfill:renderBackfillPage, stats:renderStatsPage, adonis:renderAdonisPage, coach:renderCoachPage, targets:renderTargetsPage })[currentPage]?.();
 }
 function switchPage(p) { currentPage = p; render(); }
 function changeWeek(d) { weekOffset += d; openDays = {}; render(); }
+
+function openWeekPicker() {
+  const existing = document.getElementById('week-picker-overlay');
+  if (existing) { existing.remove(); return; }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'week-picker-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:500;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:var(--surface);border:1px solid var(--border2);border-radius:16px;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,0.3);width:100%;max-width:360px;max-height:80vh;display:flex;flex-direction:column';
+
+  // Header
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'padding:16px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0';
+  hdr.innerHTML = `<div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600">Jump to Week</div><span style="cursor:pointer;font-size:18px;color:var(--muted);padding:4px 8px" onclick="document.getElementById('week-picker-overlay').remove()">✕</span>`;
+  panel.appendChild(hdr);
+
+  // Quick jumps
+  const quick = document.createElement('div');
+  quick.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0';
+  [['This week', 0], ['Last week', -1], ['2 weeks ago', -2]].forEach(([label, offset]) => {
+    const btn = document.createElement('button');
+    btn.style.cssText = `background:${offset===weekOffset?'var(--gold-dim2)':'var(--surface2)'};border:1px solid ${offset===weekOffset?'var(--gold)':'var(--border)'};border-radius:8px;padding:8px 6px;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;color:${offset===weekOffset?'var(--gold)':'var(--muted)'};text-align:center`;
+    btn.textContent = label;
+    btn.onclick = () => { weekOffset = offset; openDays = {}; overlay.remove(); render(); };
+    quick.appendChild(btn);
+  });
+  panel.appendChild(quick);
+
+  // Scrollable week list grouped by month
+  const list = document.createElement('div');
+  list.style.cssText = 'overflow-y:auto;flex:1';
+
+  let lastMonth = '';
+  for (let i = 0; i >= -52; i--) {
+    const ws = weekStart(i), we = new Date(ws); we.setDate(ws.getDate() + 6);
+    const monthLabel = ws.toLocaleDateString('en-US', { month:'long', year:'numeric' });
+
+    // Month header
+    if (monthLabel !== lastMonth) {
+      const mhdr = document.createElement('div');
+      mhdr.style.cssText = 'padding:10px 16px 6px;font-family:"DM Sans",sans-serif;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--surface2);position:sticky;top:0';
+      mhdr.textContent = monthLabel;
+      list.appendChild(mhdr);
+      lastMonth = monthLabel;
+    }
+
+    const isCurrent = i === weekOffset;
+    const isThisWeek = i === 0;
+    const row = document.createElement('div');
+    row.style.cssText = `padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:${isCurrent?'var(--gold-dim)':'transparent'}`;
+
+    const dateSpan = document.createElement('span');
+    dateSpan.style.cssText = `font-family:'DM Mono',monospace;font-size:13px;color:${isCurrent?'var(--gold)':'var(--text)'}`;
+    dateSpan.textContent = `${fmt(ws)} – ${fmt(we)}`;
+
+    const badge = document.createElement('span');
+    badge.style.cssText = `font-size:10px;font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:99px`;
+    if (isThisWeek) { badge.style.background='var(--green-dim)'; badge.style.color='var(--green)'; badge.textContent='NOW'; }
+    else if (isCurrent) { badge.style.background='var(--gold-dim2)'; badge.style.color='var(--gold)'; badge.textContent='VIEWING'; }
+
+    row.appendChild(dateSpan);
+    row.appendChild(badge);
+    row.onmouseover = () => { if (!isCurrent) row.style.background = 'var(--surface2)'; };
+    row.onmouseout = () => { if (!isCurrent) row.style.background = 'transparent'; };
+    const offset = i;
+    row.onclick = () => { weekOffset = offset; openDays = {}; overlay.remove(); render(); };
+    list.appendChild(row);
+  }
+
+  panel.appendChild(list);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
 function renderWeekControls() {
   const el = document.getElementById('nav-wc');
   if (currentPage !== 'week') { el.innerHTML = ''; return; }
   const ws = weekStart(weekOffset), we = new Date(ws); we.setDate(ws.getDate() + 6);
-  el.innerHTML = `<button class="week-btn" onclick="changeWeek(-1)">&#8592;</button><span class="week-label">${fmt(ws)} – ${fmt(we)}</span><button class="week-btn" onclick="changeWeek(1)">&#8594;</button>`;
+  const isCurrentWeek = weekOffset === 0;
+  el.innerHTML = `
+    <button class="week-btn" onclick="changeWeek(-1)">&#8592;</button>
+    <button onclick="openWeekPicker()" style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:'DM Mono',monospace;font-size:10px;color:var(--text);white-space:nowrap;display:flex;align-items:center;gap:5px">
+      ${fmt(ws)} – ${fmt(we)}
+      <span style="font-size:9px;color:var(--muted)">▾</span>
+    </button>
+    <button class="week-btn" onclick="changeWeek(1)" ${isCurrentWeek?'disabled style="opacity:.3;cursor:not-allowed"':''}>&#8594;</button>`;
 }
 
 // ── WEEK PAGE ─────────────────────────────────────────────────────────────────
@@ -780,6 +864,225 @@ async function runCoachAnalysis() {
 }
 
 // ── TARGETS PAGE ──────────────────────────────────────────────────────────────
+// ── BACKFILL PAGE ─────────────────────────────────────────────────────────────
+function renderBackfillPage() {
+  const queue = getS('backfill_queue', []);
+  const results = getS('backfill_results', []);
+
+  let html = `
+  <div class="card">
+    <div class="card-title">Backfill Old Data <span class="badge-sm badge-gold">AI Date Detection</span></div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.7">
+      Upload any old screenshots — MFP food diary, Strong workout log, or iPhone Health steps. Claude reads the date off each image and logs it to the correct day automatically. Upload as many as you want at once.
+    </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">Supported screenshots</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+        <div style="background:var(--surface);border-radius:10px;padding:10px 6px;border:1px solid var(--border)"><div style="font-size:18px;margin-bottom:4px">📱</div><div style="font-size:11px;color:var(--muted);font-weight:500">MFP Diary</div></div>
+        <div style="background:var(--surface);border-radius:10px;padding:10px 6px;border:1px solid var(--border)"><div style="font-size:18px;margin-bottom:4px">🏋️</div><div style="font-size:11px;color:var(--muted);font-weight:500">Strong App</div></div>
+        <div style="background:var(--surface);border-radius:10px;padding:10px 6px;border:1px solid var(--border)"><div style="font-size:18px;margin-bottom:4px">👟</div><div style="font-size:11px;color:var(--muted);font-weight:500">Health Steps</div></div>
+      </div>
+    </div>
+    <label class="upload-tile" style="display:block;padding:20px;text-align:center;margin-bottom:10px;border-radius:12px">
+      <input type="file" accept="image/*" multiple onchange="handleBackfillUpload(event)" style="position:absolute;opacity:0;width:0;height:0">
+      <div style="font-size:24px;margin-bottom:6px">📂</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:3px">Tap to select screenshots</div>
+      <div style="font-size:12px;color:var(--muted)">Select multiple at once — hold and tap each one</div>
+    </label>`;
+
+  if (queue.length > 0) {
+    html += `<div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">Ready to process — ${queue.length} screenshot${queue.length>1?'s':''}</div>`;
+    queue.forEach((item, i) => {
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:18px">${item.type==='mfp'?'📱':item.type==='strong'?'🏋️':'👟'}</div>
+        <div style="flex:1;font-size:12px;color:var(--text);font-family:'DM Mono',monospace">${item.name}</div>
+        <span style="cursor:pointer;color:var(--red);opacity:.5;font-size:12px;padding:4px 8px" onclick="removeBackfillItem(${i})">✕</span>
+      </div>`;
+    });
+    html += `</div>
+    <button class="proc-btn" id="backfill-btn" onclick="runBackfill()">
+      Read All Screenshots &amp; Log to Correct Days
+    </button>
+    <div class="ai-out" id="backfill-out"></div>`;
+  }
+
+  if (results.length > 0) {
+    html += `<div class="card" style="margin-top:12px">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Backfill Results</span>
+        <span style="font-size:12px;color:var(--muted);cursor:pointer;font-weight:400" onclick="saveState('backfill_results',[]);renderBackfillPage()">Clear</span>
+      </div>`;
+    results.slice().reverse().forEach(r => {
+      const statusColor = r.status==='success'?'var(--green)':r.status==='partial'?'var(--amber)':'var(--red)';
+      html += `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <div style="font-size:13px;font-weight:500;color:var(--text)">${r.day} — ${r.date}</div>
+          <span style="font-size:10px;font-weight:600;color:${statusColor};font-family:'DM Mono',monospace">${r.status.toUpperCase()}</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;line-height:1.6">${r.summary}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  document.getElementById('page-backfill').innerHTML = html;
+}
+
+function handleBackfillUpload(ev) {
+  const files = Array.from(ev.target.files); if (!files.length) return;
+  const queue = getS('backfill_queue', []);
+  let loaded = 0;
+  files.forEach(f => {
+    const r = new FileReader();
+    r.onload = e => {
+      const dataUrl = e.target.result;
+      const mime = dataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+      queue.push({ name: f.name, b64: dataUrl.split(',')[1], mime });
+      loaded++;
+      if (loaded === files.length) { saveState('backfill_queue', queue); renderBackfillPage(); }
+    };
+    r.readAsDataURL(f);
+  });
+}
+
+function removeBackfillItem(idx) {
+  const queue = getS('backfill_queue', []);
+  queue.splice(idx, 1);
+  saveState('backfill_queue', queue);
+  renderBackfillPage();
+}
+
+async function runBackfill() {
+  const queue = getS('backfill_queue', []); if (!queue.length) return;
+  const btn = document.getElementById('backfill-btn'), out = document.getElementById('backfill-out');
+  if (!btn || !out) return;
+  btn.disabled = true;
+  out.className = 'ai-out show'; out.textContent = '';
+  const results = getS('backfill_results', []);
+  const targets = getTargets();
+
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    btn.innerHTML = `<span class="spinner"></span>Processing ${i+1} of ${queue.length}…`;
+    out.textContent += `Reading ${item.name}…
+`;
+
+    try {
+      const content = [
+        { type:'image', source:{ type:'base64', media_type:item.mime, data:item.b64 } },
+        { type:'text', text:`You are reading a fitness screenshot to extract data and determine what day it is from.
+
+This could be a MyFitnessPal food diary, a Strong app workout log, or an iPhone Health app steps screenshot.
+
+STEP 1 — Identify the date shown in the screenshot. Look for any date label, header, or timestamp.
+Output: DATE_FOUND: [YYYY-MM-DD] or DATE_FOUND: unknown
+
+STEP 2 — Identify the type of data:
+Output: DATA_TYPE: mfp OR strong OR steps OR unknown
+
+STEP 3 — Extract the data:
+For MFP: CALORIES: [number] PROTEIN: [number]g CARBS: [number]g FAT: [number]g
+For Strong: WORKOUT_LOGGED: true EXERCISES: [comma separated list of exercise names]
+For Steps: STEPS: [number]
+
+STEP 4 — One line summary of what you found.
+SUMMARY: [text]
+
+Be precise. If you cannot find a date, output DATE_FOUND: unknown.` }
+      ];
+
+      const resp = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ messages:[{role:'user',content}] }) });
+      const data = await resp.json();
+      const text = data.content?.map(c=>c.text||'').join('') || '';
+
+      // Parse date
+      const dateMatch = text.match(/DATE_FOUND:\s*(\d{4}-\d{2}-\d{2})/i);
+      const typeMatch = text.match(/DATA_TYPE:\s*(mfp|strong|steps|unknown)/i);
+      const summaryMatch = text.match(/SUMMARY:\s*(.+)/i);
+      const summary = summaryMatch ? summaryMatch[1].trim() : 'No summary';
+
+      if (!dateMatch || dateMatch[1] === 'unknown') {
+        results.push({ day:'Unknown', date:item.name, status:'error', summary:'Could not detect date from screenshot' });
+        out.textContent += `  ✗ Could not find date in ${item.name}
+`;
+        continue;
+      }
+
+      const imgDate = new Date(dateMatch[1] + 'T12:00:00');
+      const dataType = typeMatch ? typeMatch[1] : 'unknown';
+
+      // Find which week offset this date belongs to
+      const today = new Date(); today.setHours(0,0,0,0);
+      const imgDay = new Date(imgDate); imgDay.setHours(0,0,0,0);
+      const diffDays = Math.round((imgDay - today) / (1000*60*60*24));
+      const targetOffset = Math.floor((diffDays - imgDate.getDay() * -1) / 7);
+      // More precise: find the Sunday of that week
+      const imgSunday = new Date(imgDate); imgSunday.setDate(imgDate.getDate() - imgDate.getDay());
+      const thisSunday = new Date(today); thisSunday.setDate(today.getDate() - today.getDay());
+      const weekDiff = Math.round((imgSunday - thisSunday) / (1000*60*60*24*7));
+
+      const wk = weekKey(weekDiff);
+      const dayName = imgDate.toLocaleDateString('en-US', { weekday:'long' });
+      const dateLabel = imgDate.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+
+      // Log to state
+      const state = getS('checks_' + wk, {});
+      const aiSt = getS('aistatus_' + wk + '_' + dayName, {});
+      let logged = [];
+
+      if (dataType === 'mfp') {
+        const calMatch = text.match(/CALORIES:\s*(\d+)/i);
+        const protMatch = text.match(/PROTEIN:\s*(\d+)g/i);
+        const tgt = DAY_CONFIG[dayName]?.type === 'high'
+          ? { cal:targets.highCal, prot:targets.prot }
+          : { cal:targets.lowCal, prot:targets.prot };
+        if (calMatch) {
+          const cal = parseInt(calMatch[1]);
+          const diff = tgt.cal - cal;
+          if (cal >= tgt.cal - 100 && cal <= tgt.cal + 50) { state[sk(wk,dayName,'calories')] = true; logged.push('calories ✓'); }
+          aiSt.calories = { cls: cal>tgt.cal?'bad':diff<=100?'ok':'warn', val: cal>tgt.cal?`+${Math.abs(diff)} over`:`${diff} under` };
+        }
+        if (protMatch) {
+          const prot = parseInt(protMatch[1]);
+          if (prot >= targets.prot) { state[sk(wk,dayName,'protein')] = true; logged.push('protein ✓'); }
+          aiSt.protein = { cls: prot>=targets.prot?'ok':'bad', val: prot+'g' };
+        }
+      } else if (dataType === 'strong') {
+        state[sk(wk,dayName,'lift')] = true; logged.push('lift ✓');
+      } else if (dataType === 'steps') {
+        const stepsMatch = text.match(/STEPS:\s*([\d,]+)/i);
+        if (stepsMatch) {
+          const steps = parseInt(stepsMatch[1].replace(',',''));
+          if (steps >= 10000) { state[sk(wk,dayName,'steps')] = true; logged.push('steps ✓'); }
+          aiSt.steps = { cls: steps>=10000?'ok':'bad', val: steps.toLocaleString() };
+        }
+      }
+
+      saveState('checks_' + wk, state);
+      saveState('aistatus_' + wk + '_' + dayName, aiSt);
+
+      const status = logged.length > 0 ? 'success' : 'partial';
+      results.push({ day: dayName, date: dateLabel, status, summary: `${summary} | Logged: ${logged.join(', ')||'no KPIs met'}` });
+      out.textContent += `  ✓ ${dayName} ${dateLabel} — ${logged.join(', ')||'no KPIs met'}
+`;
+
+    } catch(err) {
+      results.push({ day:'Error', date:item.name, status:'error', summary:err.message });
+      out.textContent += `  ✗ Error: ${err.message}
+`;
+    }
+  }
+
+  saveState('backfill_queue', []);
+  saveState('backfill_results', results);
+  toast(`Backfill complete — ${results.filter(r=>r.status==='success').length}/${results.length} logged`);
+  renderBackfillPage();
+  btn.disabled = false;
+  btn.innerHTML = 'Read All Screenshots &amp; Log to Correct Days';
+}
+
 function renderTargetsPage() {
   const t = getTargets(), apiKey = getS('api_key','');
   document.getElementById('page-targets').innerHTML = `
