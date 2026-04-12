@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Movie Star Body</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#080808">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- NAV -->
+  <nav class="nav">
+    <div class="nav-brand">MSB<span class="nav-dot">.</span></div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-tab="week">WEEK</button>
+      <button class="nav-tab" data-tab="monday">CHECK-IN</button>
+      <button class="nav-tab" data-tab="coach">COACH</button>
+      <button class="nav-tab" data-tab="history">HISTORY</button>
+    </div>
+  </nav>
+
+  <!-- WEEK TAB -->
+  <div class="tab-content active" id="tab-week">
+    <div class="week-header">
+      <button class="arrow-btn" id="prev-week">&#8592;</button>
+      <div class="week-info">
+        <div class="week-label" id="week-label">Week of —</div>
+        <div class="week-avg" id="week-avg">Avg: — kcal/day</div>
+      </div>
+      <button class="arrow-btn" id="next-week">&#8594;</button>
+    </div>
+
+    <div class="kpi-summary" id="kpi-summary">
+      <div class="kpi-pill" id="kpi-protein"><span class="kp-n">0/7</span><span class="kp-l">Protein</span></div>
+      <div class="kpi-pill" id="kpi-lifts"><span class="kp-n">0/3</span><span class="kp-l">Lifts</span></div>
+      <div class="kpi-pill" id="kpi-steps"><span class="kp-n">0/7</span><span class="kp-l">Steps</span></div>
+      <div class="kpi-pill" id="kpi-cardio"><span class="kp-n">0/5</span><span class="kp-l">Cardio</span></div>
+      <div class="kpi-pill" id="kpi-score"><span class="kp-n">0%</span><span class="kp-l">Score</span></div>
+    </div>
+
+    <div id="days-list"></div>
+  </div>
+
+  <!-- MONDAY CHECK-IN TAB -->
+  <div class="tab-content" id="tab-monday">
+    <div class="section-header">
+      <div class="section-title">Monday Check-In</div>
+      <div class="section-sub mono">Weigh-in · Measurements · Progress Photos</div>
+    </div>
+
+    <div class="card" id="adonis-card">
+      <div class="adonis-ratio" id="adonis-display">—</div>
+      <div class="adonis-label">Adonis Index <span class="mono" style="font-size:11px;opacity:.5">(target: 1.618)</span></div>
+      <div class="adonis-bar-bg"><div class="adonis-bar-fill" id="adonis-bar"></div></div>
+      <div class="adonis-targets mono">Current: <span id="adonis-current">—</span> &nbsp;|&nbsp; Target: <span>1.618</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Body Measurements</div>
+      <div class="meas-grid">
+        <div class="meas-field"><label>Weight (lbs)</label><input type="number" id="m-weight" step="0.1" placeholder="—"></div>
+        <div class="meas-field"><label>Body Fat %</label><input type="number" id="m-bf" step="0.1" placeholder="—"></div>
+        <div class="meas-field"><label>Neck (in)</label><input type="number" id="m-neck" step="0.25" placeholder="—"></div>
+        <div class="meas-field"><label>Chest (in)</label><input type="number" id="m-chest" step="0.25" placeholder="—"></div>
+        <div class="meas-field"><label>Shoulders (in)</label><input type="number" id="m-shoulders" step="0.25" placeholder="—"></div>
+        <div class="meas-field"><label>Waist (in)</label><input type="number" id="m-waist" step="0.25" placeholder="—"></div>
+        <div class="meas-field"><label>Abdomen (in)</label><input type="number" id="m-abdomen" step="0.25" placeholder="—"></div>
+        <div class="meas-field"><label>Hips / Glutes (in)</label><input type="number" id="m-hips" step="0.25" placeholder="—"></div>
+        <div class="meas-field"><label>Thigh (in)</label><input type="number" id="m-thigh" step="0.25" placeholder="—"></div>
+        <div class="meas-field"><label>Calf (in)</label><input type="number" id="m-calf" step="0.25" placeholder="—"></div>
+      </div>
+      <button class="primary-btn" onclick="saveMeasurement()">Save measurements</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Progress Photos</div>
+      <div class="photo-sub mono">Upload all 4 each Monday for best comparison</div>
+      <div class="photo-grid">
+        <div class="photo-slot" id="photo-front">
+          <input type="file" accept="image/*" onchange="handlePhoto(event,'front')">
+          <div class="photo-placeholder"><div class="photo-icon">+</div><div class="photo-lbl">Front</div></div>
+        </div>
+        <div class="photo-slot" id="photo-back">
+          <input type="file" accept="image/*" onchange="handlePhoto(event,'back')">
+          <div class="photo-placeholder"><div class="photo-icon">+</div><div class="photo-lbl">Back</div></div>
+        </div>
+        <div class="photo-slot" id="photo-side">
+          <input type="file" accept="image/*" onchange="handlePhoto(event,'side')">
+          <div class="photo-placeholder"><div class="photo-icon">+</div><div class="photo-lbl">Side</div></div>
+        </div>
+        <div class="photo-slot" id="photo-flex">
+          <input type="file" accept="image/*" onchange="handlePhoto(event,'flex')">
+          <div class="photo-placeholder"><div class="photo-icon">+</div><div class="photo-lbl">Flexed</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COACH TAB -->
+  <div class="tab-content" id="tab-coach">
+    <div class="section-header">
+      <div class="section-title">Weekly Coach Analysis</div>
+      <div class="section-sub mono">AI-powered bodybuilding coach review</div>
+    </div>
+
+    <div class="card goal-card">
+      <div class="goal-title">The Goal</div>
+      <div class="goal-stats">
+        <div class="goal-stat"><span class="gs-val">32"</span><span class="gs-lbl">Waist</span></div>
+        <div class="goal-divider"></div>
+        <div class="goal-stat"><span class="gs-val">52"</span><span class="gs-lbl">Shoulders</span></div>
+        <div class="goal-divider"></div>
+        <div class="goal-stat"><span class="gs-val">9–11%</span><span class="gs-lbl">Body fat</span></div>
+        <div class="goal-divider"></div>
+        <div class="goal-stat"><span class="gs-val">6'0"</span><span class="gs-lbl">Height</span></div>
+      </div>
+      <div class="goal-models mono">Will Smith (Focus) · MBJ (Black Panther)</div>
+    </div>
+
+    <div class="card" id="projection-card" style="display:none">
+      <div class="card-title">Projection</div>
+      <div id="projection-content"></div>
+    </div>
+
+    <button class="primary-btn full-btn" id="coach-btn" onclick="runCoachAnalysis()">
+      Run this week's coaching analysis
+    </button>
+
+    <div class="card" id="coach-result-card" style="display:none">
+      <div class="card-title">Coach Feedback <span class="mono" id="coach-week-label" style="font-size:11px;opacity:.5"></span></div>
+      <div class="coach-output" id="coach-output"></div>
+    </div>
+
+    <div id="past-analyses"></div>
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div class="tab-content" id="tab-history">
+    <div class="section-header">
+      <div class="section-title">Progress History</div>
+      <div class="section-sub mono">Every Monday check-in</div>
+    </div>
+    <div id="history-list"></div>
+  </div>
+
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
