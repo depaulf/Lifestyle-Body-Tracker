@@ -345,7 +345,14 @@ async function processScreenshots(wk, day) {
 function renderCheckinPage() {
   const checkins = getS('checkins', []), photos = getS('checkin_photos_draft', {});
   const scanReady = ['scale','measurements'].some(k => photos[k]);
+  const lastCoachDate = getS('last_coach_date', '');
   let html = `
+  <div id="coach-ready-banner" style="display:none;background:var(--green-dim);border:1px solid var(--green);border-radius:12px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:var(--green);font-weight:600;text-align:center;cursor:pointer" onclick="switchPage('coach')">
+    Coach analysis ready — tap to view ›
+  </div>
+  ${lastCoachDate ? `<div style="background:var(--gold-dim);border:1px solid rgba(184,150,46,.3);border-radius:12px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:var(--gold);font-family:'DM Mono',monospace">
+    Last coach analysis: ${lastCoachDate} — <span style="cursor:pointer;text-decoration:underline" onclick="switchPage('coach')">view in Coach tab</span>
+  </div>` : ''}
   <div class="card">
     <div class="card-title">AI Photo Scan <span class="badge-sm badge-gold">Snap &amp; Auto-Fill</span></div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.7">
@@ -486,7 +493,31 @@ function saveCheckin() {
   entry.photos = {}; ['front','back','side','flex'].forEach(k => { if (allPhotos[k]) entry.photos[k] = allPhotos[k]; });
   const checkins = getS('checkins', []); checkins.unshift(entry);
   saveState('checkins', checkins); saveState('checkin_photos_draft', {});
-  toast('Check-in saved'); renderCheckinPage();
+  toast('Check-in saved — running coach analysis…');
+  renderCheckinPage();
+  // Auto-trigger coach analysis in background
+  setTimeout(() => runCoachAnalysisSilent(), 800);
+}
+
+// Silent version — runs in background after check-in, shows result in Coach tab
+async function runCoachAnalysisSilent() {
+  try {
+    const analysis = await buildAndRunCoach();
+    if (analysis) {
+      saveState('last_coach_analysis', analysis);
+      saveState('last_coach_date', new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}));
+      applyMacroAdjustments(analysis);
+      // Show banner on checkin page letting user know it's ready
+      const banner = document.getElementById('coach-ready-banner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.textContent = 'Coach analysis ready — tap Coach tab to view';
+      }
+      toast('Coach analysis complete — check Coach tab');
+    }
+  } catch(err) {
+    console.error('Auto-coach error:', err);
+  }
 }
 
 // ── STATS PAGE ────────────────────────────────────────────────────────────────
@@ -660,26 +691,68 @@ function renderCoachPage() {
     </div>`;
 }
 
+// ── SHARED COACH ENGINE ──────────────────────────────────────────────────────
+function buildCoachPrompt() {
+  const wk = weekKey(weekOffset), state = getS('checks_'+wk, {}), checkins = getS('checkins', []), targets = getTargets();
+  const latest = checkins[0]||{}, prev = checkins[1]||{};
+  let sum = `WEEK: ${wk}\n\nKPI COMPLIANCE:\n`;
+  DAYS.forEach(day => {
+    const cfg = DAY_CONFIG[day], tgt = getDayTarget(day), kpis = buildKPIs(day,tgt,cfg);
+    const done = kpis.filter(k => state[sk(wk,day,k.id)]);
+    sum += `${day} (${cfg.label}): ${done.length}/${kpis.length} — ${done.map(k=>k.id).join(', ')||'none'}\n`;
+  });
+  sum += `\nCURRENT TARGETS:\nHigh: ${targets.highCal} kcal / ${targets.highCarb}g carbs / ${targets.prot}g protein / ${targets.highFat}g fat\nLow: ${targets.lowCal} kcal / ${targets.lowCarb}g carbs / ${targets.prot}g protein / ${targets.lowFat}g fat\n`;
+  if (latest.weight) {
+    const f = ['weight','bf','waist','shoulders','chest','arms','neck','forearms','abdomen','hips','thighs','calves'];
+    sum += `\nLATEST CHECK-IN (${latest.date||'recent'}):\n`;
+    f.forEach(x => { if (latest[x]) sum += `${x}: ${latest[x]}${x==='weight'?' lbs':x==='bf'?'%':'"'}\n`; });
+    sum += `S/W ratio: ${latest.shoulders&&latest.waist?(latest.shoulders/latest.waist).toFixed(3):'—'}\n`;
+  }
+  if (prev.weight && latest.weight) {
+    sum += `\nWEEK CHANGES:\n`;
+    if (latest.weight && prev.weight) sum += `Weight: ${prev.weight}→${latest.weight} (${(latest.weight-prev.weight>0?'+':'')+(latest.weight-prev.weight).toFixed(1)} lbs)\n`;
+    if (latest.waist && prev.waist)   sum += `Waist: ${prev.waist}"→${latest.waist}"\n`;
+    if (latest.shoulders && prev.shoulders) sum += `Shoulders: ${prev.shoulders}"→${latest.shoulders}"\n`;
+  }
+  return `You are a world-class physique coach — knowledge of Greg O'Gallagher, Stan Efferding, and Jeff Nippard combined.\n\nCLIENT: 6'0", started ~210 lbs / ~23% BF. Program: Lifestyle Body (Movie Star Body protocol).\nGOAL: 32" waist, 52" shoulders, 9–11% body fat. Reference physiques: Will Smith (Focus) / Michael B. Jordan (Black Panther).\nADONIS TARGETS (6'0"): Shoulders 52" | Waist 32" | Chest 44" | Arms 16" | Neck 16.5" | Forearms 13" | Thighs 24" | Calves 15.5" | Hips 37" | Abdomen 31"\n\n${sum}\n\nProvide your full weekly coaching report:\n\n━━━ WEEKLY SCORECARD ━━━\nScore /100, letter grade, one-line verdict.\n\n━━━ WINS THIS WEEK ━━━\nSpecific. What did he nail?\n\n━━━ GAPS & MISSED GAINS ━━━\nWhat cost him progress this week?\n\n━━━ MEASUREMENT ANALYSIS ━━━\nCurrent vs Adonis targets. S/W ratio. What's moving?\n\n━━━ CALORIE & MACRO VERDICT ━━━\nAre current targets optimal? If adjusting:\nNEW HIGH DAY: [cal] kcal / [carb]g carbs / [prot]g protein / [fat]g fat\nNEW LOW DAY: [cal] kcal / [carb]g carbs / [prot]g protein / [fat]g fat\n\n━━━ NEXT WEEK GAME PLAN ━━━\nSpecific, actionable changes only.\n\n━━━ WORKOUT FOCUS ━━━\nV-taper priority exercises and cues for this exact week.\n\n━━━ TIMELINE TO GOAL ━━━\n• Estimated weeks to 32" waist and Adonis ratio\n• Estimated weeks to 9–11% body fat\n• Approximate workouts remaining to goal\n• Approximate cardio sessions remaining to goal\n\n━━━ COACH'S WORD ━━━\nReal, powerful, God-centered. Speak to who he's becoming. Reference the Will Smith / MBJ vision. Make him want to lock in completely.`;
+}
+
+function applyMacroAdjustments(text) {
+  const hm = text.match(/NEW HIGH DAY:\s*(\d+)\s*kcal\s*\/\s*(\d+)g\s*carbs\s*\/\s*(\d+)g\s*protein\s*\/\s*(\d+)g\s*fat/i);
+  const lm = text.match(/NEW LOW DAY:\s*(\d+)\s*kcal\s*\/\s*(\d+)g\s*carbs\s*\/\s*(\d+)g\s*protein\s*\/\s*(\d+)g\s*fat/i);
+  if (hm || lm) {
+    const t = getTargets();
+    if (hm) { t.highCal=parseInt(hm[1]); t.highCarb=parseInt(hm[2]); t.prot=parseInt(hm[3]); t.highFat=parseInt(hm[4]); }
+    if (lm) { t.lowCal=parseInt(lm[1]); t.lowCarb=parseInt(lm[2]); t.lowFat=parseInt(lm[4]); }
+    saveState('targets', t);
+    toast('Coach updated your targets for next week');
+  }
+}
+
+async function buildAndRunCoach() {
+  const prompt = buildCoachPrompt();
+  const resp = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages:[{role:'user',content:[{type:'text',text:prompt}]}], max_tokens:2000 })
+  });
+  const data = await resp.json();
+  return data.content?.map(c=>c.text||'').join('') || data.error || null;
+}
+
 async function runCoachAnalysis() {
   const btn = document.getElementById('analyze-btn'), out = document.getElementById('coach-out');
+  if (!btn || !out) return;
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Your coach is analyzing…';
   out.className = 'coach-out show'; out.textContent = 'Reviewing your week…';
-  const wk=weekKey(weekOffset), state=getS('checks_'+wk,{}), checkins=getS('checkins',[]), targets=getTargets();
-  const latest=checkins[0]||{}, prev=checkins[1]||{};
-  let sum = `WEEK: ${wk}\n\nKPI COMPLIANCE:\n`;
-  DAYS.forEach(day => { const cfg=DAY_CONFIG[day],tgt=getDayTarget(day),kpis=buildKPIs(day,tgt,cfg),done=kpis.filter(k=>state[sk(wk,day,k.id)]); sum+=`${day} (${cfg.label}): ${done.length}/${kpis.length} — ${done.map(k=>k.id).join(', ')||'none'}\n`; });
-  sum += `\nCURRENT TARGETS:\nHigh: ${targets.highCal} kcal / ${targets.highCarb}g carbs / ${targets.prot}g protein / ${targets.highFat}g fat\nLow: ${targets.lowCal} kcal / ${targets.lowCarb}g carbs / ${targets.prot}g protein / ${targets.lowFat}g fat\n`;
-  if (latest.weight) { const f=['weight','bf','waist','shoulders','chest','arms','neck','forearms','abdomen','hips','thighs','calves']; sum+=`\nLATEST CHECK-IN (${latest.date||'recent'}):\n`; f.forEach(x=>{if(latest[x])sum+=`${x}: ${latest[x]}${x==='weight'?' lbs':x==='bf'?'%':'"'}\n`;}); sum+=`S/W ratio: ${latest.shoulders&&latest.waist?(latest.shoulders/latest.waist).toFixed(3):'—'}\n`; }
-  if (prev.weight&&latest.weight) { sum+=`\nWEEK CHANGES:\n`; if(latest.weight&&prev.weight)sum+=`Weight: ${prev.weight}→${latest.weight} (${(latest.weight-prev.weight>0?'+':'')+(latest.weight-prev.weight).toFixed(1)} lbs)\n`; if(latest.waist&&prev.waist)sum+=`Waist: ${prev.waist}"→${latest.waist}"\n`; if(latest.shoulders&&prev.shoulders)sum+=`Shoulders: ${prev.shoulders}"→${latest.shoulders}"\n`; }
-  const prompt = `You are a world-class physique coach — knowledge of Greg O'Gallagher, Stan Efferding, and Jeff Nippard combined.\n\nCLIENT: 6'0", started ~210 lbs / ~23% BF. Program: Lifestyle Body (Movie Star Body protocol).\nGOAL: 32" waist, 52" shoulders, 9–11% body fat. Reference physiques: Will Smith (Focus) / Michael B. Jordan (Black Panther).\nADONIS TARGETS (6'0"): Shoulders 52" | Waist 32" | Chest 44" | Arms 16" | Neck 16.5" | Forearms 13" | Thighs 24" | Calves 15.5" | Hips 37" | Abdomen 31"\n\n${sum}\n\nProvide your full weekly coaching report:\n\n━━━ WEEKLY SCORECARD ━━━\nScore /100, letter grade, one-line verdict.\n\n━━━ WINS THIS WEEK ━━━\nSpecific. What did he nail?\n\n━━━ GAPS & MISSED GAINS ━━━\nWhat cost him progress this week?\n\n━━━ MEASUREMENT ANALYSIS ━━━\nCurrent vs Adonis targets. S/W ratio. What's moving?\n\n━━━ CALORIE & MACRO VERDICT ━━━\nAre current targets optimal? If adjusting:\nNEW HIGH DAY: [cal] kcal / [carb]g carbs / [prot]g protein / [fat]g fat\nNEW LOW DAY: [cal] kcal / [carb]g carbs / [prot]g protein / [fat]g fat\n\n━━━ NEXT WEEK GAME PLAN ━━━\nSpecific, actionable changes only.\n\n━━━ WORKOUT FOCUS ━━━\nV-taper priority exercises and cues for this exact week.\n\n━━━ TIMELINE TO GOAL ━━━\n• Estimated weeks to 32" waist and Adonis ratio\n• Estimated weeks to 9–11% body fat\n• Approximate workouts remaining to goal\n• Approximate cardio sessions remaining to goal\n\n━━━ COACH'S WORD ━━━\nReal, powerful, God-centered. Speak to who he's becoming. Reference the Will Smith / MBJ vision. Make him want to lock in completely.`;
   try {
-    const resp = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ messages:[{role:'user',content:[{type:'text',text:prompt}]}], max_tokens:2000 }) });
-    const data = await resp.json(); const text = data.content?.map(c=>c.text||'').join('') || data.error || 'Error';
-    out.textContent = text;
-    saveState('last_coach_analysis', text); saveState('last_coach_date', new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}));
-    const hm = text.match(/NEW HIGH DAY:\s*(\d+)\s*kcal\s*\/\s*(\d+)g\s*carbs\s*\/\s*(\d+)g\s*protein\s*\/\s*(\d+)g\s*fat/i);
-    const lm = text.match(/NEW LOW DAY:\s*(\d+)\s*kcal\s*\/\s*(\d+)g\s*carbs\s*\/\s*(\d+)g\s*protein\s*\/\s*(\d+)g\s*fat/i);
-    if (hm||lm) { const t=getTargets(); if(hm){t.highCal=parseInt(hm[1]);t.highCarb=parseInt(hm[2]);t.prot=parseInt(hm[3]);t.highFat=parseInt(hm[4]);} if(lm){t.lowCal=parseInt(lm[1]);t.lowCarb=parseInt(lm[2]);t.lowFat=parseInt(lm[4]);} saveState('targets',t); toast('Coach updated your targets'); }
+    const text = await buildAndRunCoach();
+    if (text) {
+      out.textContent = text;
+      saveState('last_coach_analysis', text);
+      saveState('last_coach_date', new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}));
+      applyMacroAdjustments(text);
+    }
   } catch(err) { out.textContent = 'Error: ' + err.message; }
   btn.disabled = false; btn.innerHTML = 'Analyze My Week &amp; Get Coaching';
 }
