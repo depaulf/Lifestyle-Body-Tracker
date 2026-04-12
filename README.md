@@ -1,5 +1,5 @@
-# Movie Star Body — KPI Tracker
-## Greg O'Gallagher Protocol
+# Lifestyle Body — KPI Tracker
+
 
 ---
 
