@@ -25,7 +25,41 @@ function loadState() { try { return JSON.parse(localStorage.getItem('msb_state')
 function saveState(k, v) { const s = loadState(); s[k] = v; localStorage.setItem('msb_state', JSON.stringify(s)); }
 function getS(k, d) { return loadState()[k] ?? d; }
 function getTargets() { return getS('targets', { highCal:2500, highCarb:254, highFat:76, lowCal:1950, lowCarb:139, lowFat:66, prot:200 }); }
-function getDayTarget(day) { const t = getTargets(), c = DAY_CONFIG[day]; return c.type === 'high' ? { cal:t.highCal, carb:t.highCarb, fat:t.highFat, prot:t.prot } : { cal:t.lowCal, carb:t.lowCarb, fat:t.lowFat, prot:t.prot }; }
+
+// Returns the effective config for a day, applying any weekly overrides
+function getEffectiveCfg(day) {
+  const wk = weekKey(weekOffset);
+  const overrides = getS('day_overrides_' + wk, {});
+  const base = { ...DAY_CONFIG[day] };
+  if (!overrides[day]) return base;
+  const ov = overrides[day];
+  // Apply override type
+  if (ov === 'high') return { ...base, type:'high', label:'Lift + Cardio', lift:true, cardio:true };
+  if (ov === 'low')  return { ...base, type:'low',  label:'Cardio Only',   lift:false, cardio:true };
+  if (ov === 'rest') return { ...base, type:'rest', label:'Rest',          lift:false, cardio:false };
+  return base;
+}
+
+function getDayTarget(day) {
+  const t = getTargets(), cfg = getEffectiveCfg(day);
+  return cfg.type === 'high'
+    ? { cal:t.highCal, carb:t.highCarb, fat:t.highFat, prot:t.prot }
+    : { cal:t.lowCal,  carb:t.lowCarb,  fat:t.lowFat,  prot:t.prot };
+}
+
+function cycleDayType(day) {
+  const wk = weekKey(weekOffset);
+  const overrides = getS('day_overrides_' + wk, {});
+  const current = getEffectiveCfg(day).type;
+  // Cycle: high → low → rest → high
+  const next = current === 'high' ? 'low' : current === 'low' ? 'rest' : 'high';
+  // If cycling back to the original default, remove override
+  if (next === DAY_CONFIG[day].type) { delete overrides[day]; }
+  else { overrides[day] = next; }
+  saveState('day_overrides_' + wk, overrides);
+  toast(`${day} → ${next === 'high' ? 'Lift + Cardio' : next === 'low' ? 'Cardio Only' : 'Rest'}`);
+  renderWeekPage();
+}
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function weekStart(o) { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - d.getDay() + o * 7); return d; }
@@ -93,8 +127,10 @@ function renderWeekPage() {
     <div class="kpi-tile"><div class="big ${g(cardio)}">${cardio}<span style="font-size:14px;color:var(--faint)">/5</span></div><div class="lbl">Cardio</div></div>
   </div>`;
   const ws = weekStart(weekOffset);
+  const wkOverrides = getS('day_overrides_' + wk, {});
   DAYS.forEach((day, idx) => {
-    const cfg = DAY_CONFIG[day], tgt = getDayTarget(day);
+    const cfg = getEffectiveCfg(day), tgt = getDayTarget(day);
+    const isOverridden = !!wkOverrides[day];
     const dayDate = new Date(ws); dayDate.setDate(ws.getDate() + idx);
     const kpis = buildKPIs(day, tgt, cfg), total = kpis.length;
     const done = kpis.filter(k => state[sk(wk, day, k.id)]).length;
@@ -113,7 +149,7 @@ function renderWeekPage() {
           </div>
         </div>
         <div class="day-right">
-          <span class="dbadge ${bc}">${cfg.label}</span>
+          <span class="dbadge ${bc}" onclick="event.stopPropagation();cycleDayType('${day}')" style="cursor:pointer;${isOverridden ? 'outline:2px solid var(--gold);outline-offset:2px;' : ''}" title="Tap to change day type">${cfg.label}${isOverridden ? ' ✎' : ''}</span>
           <span class="day-score">${done}/${total}</span>
         </div>
       </div>
