@@ -68,6 +68,87 @@ function sk(wk, day, kpi) { return `${wk}|${day}|${kpi}`; }
 function fmt(d) { return d.toLocaleDateString('en-US', { month:'short', day:'numeric' }); }
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
 
+// ── STREAK & PROJECTION ──────────────────────────────────────────────────────
+function calcStreak() {
+  let streak = 0;
+  for (let i = 1; i <= 52; i++) {
+    const wk = weekKey(-i), state = getS('checks_' + wk, {});
+    let total = 0, hit = 0;
+    DAYS.forEach(day => {
+      const cfg = DAY_CONFIG[day], tgt = getDayTarget(day);
+      // use base config for historical weeks
+      const baseCfg = DAY_CONFIG[day];
+      const baseTgt = baseCfg.type === 'high'
+        ? { cal: getTargets().highCal, carb: getTargets().highCarb, fat: getTargets().highFat, prot: getTargets().prot }
+        : { cal: getTargets().lowCal,  carb: getTargets().lowCarb,  fat: getTargets().lowFat,  prot: getTargets().prot };
+      const kpis = buildKPIs(day, baseTgt, baseCfg);
+      total += kpis.length;
+      hit += kpis.filter(k => state[sk(wk, day, k.id)]).length;
+    });
+    const pct = total > 0 ? (hit / total) * 100 : 0;
+    if (pct >= 80) streak++;
+    else break;
+  }
+  return streak;
+}
+
+function calcProjectedDate() {
+  const checkins = getS('checkins', []);
+  if (checkins.length < 2) return null;
+  // Find latest waist measurement
+  const recent = checkins.find(c => c.waist);
+  const older = checkins.slice(1).find(c => c.waist);
+  if (!recent || !older) return null;
+  const weeklyLoss = older.waist - recent.waist; // positive = losing
+  if (weeklyLoss <= 0) return null;
+  const weeksNeeded = Math.ceil((recent.waist - 32) / weeklyLoss);
+  if (weeksNeeded <= 0 || weeksNeeded > 200) return null;
+  const projDate = new Date();
+  projDate.setDate(projDate.getDate() + weeksNeeded * 7);
+  return {
+    date: projDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+    weeks: weeksNeeded,
+    weeklyLoss: weeklyLoss.toFixed(2)
+  };
+}
+
+// ── MONDAY REMINDER ──────────────────────────────────────────────────────────
+function requestNotificationPermission() {
+  if (!('Notification' in window)) { toast('Notifications not supported on this browser'); return; }
+  Notification.requestPermission().then(perm => {
+    if (perm === 'granted') {
+      saveState('notif_enabled', true);
+      toast('Monday reminders enabled!');
+      scheduleMondayCheck();
+    } else {
+      toast('Permission denied — enable in browser settings');
+    }
+  });
+}
+
+function scheduleMondayCheck() {
+  // Check every 30 min if it's Monday morning and we should notify
+  setInterval(() => {
+    const now = new Date();
+    const enabled = getS('notif_enabled', false);
+    const lastNotif = getS('last_monday_notif', '');
+    const todayKey = now.toISOString().slice(0, 10);
+    if (enabled && now.getDay() === 1 && now.getHours() >= 7 && now.getHours() < 9 && lastNotif !== todayKey) {
+      if (Notification.permission === 'granted') {
+        new Notification('Lifestyle Body', {
+          body: 'Monday check-in time — weigh in, take measurements, log your photos.',
+          icon: '/icon-192.png'
+        });
+        saveState('last_monday_notif', todayKey);
+      }
+    }
+  }, 30 * 60 * 1000);
+}
+
+// Run scheduler on load
+if (getS('notif_enabled', false) && Notification.permission === 'granted') scheduleMondayCheck();
+
+
 // ── RENDER ────────────────────────────────────────────────────────────────────
 function render() {
   applyTheme();
@@ -120,7 +201,22 @@ function renderWeekPage() {
     if (state[sk(wk,d,'cardio')]) cardio++;
   });
   const g = n => n > 0 ? 'gold' : '';
-  let html = `<div class="kpi-grid">
+  const streak = calcStreak();
+  const proj = calcProjectedDate();
+  const streakEmoji = streak === 0 ? '' : streak >= 8 ? ' 🔥' : streak >= 4 ? ' ⚡' : '';
+  let html = `
+  <div class="streak-bar">
+    <div class="streak-left">
+      <div class="streak-num ${streak > 0 ? 'gold' : ''}">${streak}<span style="font-size:14px;font-family:'DM Sans',sans-serif;font-weight:500"> wk streak${streakEmoji}</span></div>
+      <div class="streak-sub">${streak === 0 ? 'Hit 80%+ this week to start your streak' : streak === 1 ? 'Started — keep it going' : `${streak} weeks of 80%+ compliance`}</div>
+    </div>
+    ${proj ? `<div class="streak-right">
+      <div class="streak-proj-label">Goal waist est.</div>
+      <div class="streak-proj-date">${proj.date}</div>
+      <div class="streak-proj-sub">${proj.weeks} weeks · ${proj.weeklyLoss}" / wk</div>
+    </div>` : ''}
+  </div>
+  <div class="kpi-grid">
     <div class="kpi-tile"><div class="big ${g(prot)}">${prot}<span style="font-size:14px;color:var(--faint)">/7</span></div><div class="lbl">Protein</div></div>
     <div class="kpi-tile"><div class="big ${g(lifts)}">${lifts}<span style="font-size:14px;color:var(--faint)">/3</span></div><div class="lbl">Lifts</div></div>
     <div class="kpi-tile"><div class="big ${g(steps)}">${steps}<span style="font-size:14px;color:var(--faint)">/7</span></div><div class="lbl">Steps</div></div>
@@ -309,14 +405,54 @@ function renderCheckinPage() {
       </div>`;
       if (c.photos && ['front','back','side','flex'].some(k => c.photos[k])) {
         html += `<div class="h-photos">`;
-        ['front','back','side','flex'].forEach(k => { if (c.photos[k]) html += `<img class="h-photo" src="${c.photos[k]}" alt="${k}">`; });
+        ['front','back','side','flex'].forEach(k => { if (c.photos[k]) html += `<img class="h-photo" src="${c.photos[k]}" alt="${k}" onclick="openPhotoCompare(${checkins.indexOf(c)})">`; });
         html += `</div>`;
       }
       html += `</div>`;
     });
     html += `</div>`;
   }
+
+  // Photo compare modal state
+  const compareIdx = getS('compare_idx', null);
+  if (compareIdx !== null && checkins.length >= 2) {
+    const cA = checkins[checkins.length - 1]; // oldest
+    const cB = checkins[0]; // latest
+    if (cA.photos && cB.photos) {
+      const angles = ['front','back','side','flex'].filter(k => cA.photos[k] || cB.photos[k]);
+      html += `<div class="card" id="compare-section">
+        <div class="card-title">Photo Comparison <span class="badge-sm badge-gold">Side by Side</span>
+          <span style="margin-left:auto;font-size:12px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif" onclick="closeCompare()">✕ Close</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace">${cA.date}</div>
+          <div style="font-size:11px;color:var(--gold);font-family:'DM Mono',monospace">${cB.date} (latest)</div>
+        </div>`;
+      angles.forEach(angle => {
+        html += `<div style="margin-bottom:12px">
+          <div style="font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">${angle}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>${cA.photos[angle] ? `<img src="${cA.photos[angle]}" style="width:100%;border-radius:10px;border:1px solid var(--border)" alt="before">` : `<div style="aspect-ratio:3/4;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--faint)">No photo</div>`}</div>
+            <div>${cB.photos[angle] ? `<img src="${cB.photos[angle]}" style="width:100%;border-radius:10px;border:1px solid var(--gold)" alt="after">` : `<div style="aspect-ratio:3/4;background:var(--surface2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--faint)">No photo</div>`}</div>
+          </div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+  }
+
+  // Compare button if 2+ check-ins with photos
+  const hasPhotoPairs = checkins.filter(c => c.photos && ['front','back','side','flex'].some(k => c.photos[k])).length >= 2;
+  if (hasPhotoPairs && compareIdx === null) {
+    html += `<button class="save-btn btn-navy" onclick="openPhotoCompare(0)" style="margin-bottom:12px">Compare First vs Latest Photos</button>`;
+  }
+
   document.getElementById('page-checkin').innerHTML = html;
+  if (compareIdx !== null) { document.getElementById('compare-section')?.scrollIntoView({ behavior:'smooth', block:'start' }); }
+}
+
+function openPhotoCompare(idx) { saveState('compare_idx', idx); renderCheckinPage(); }
+function closeCompare() { saveState('compare_idx', null); renderCheckinPage(); 
 }
 
 function handleCheckinScan(ev, slot) { const f = ev.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = e => { const p = getS('checkin_photos_draft', {}); p[slot] = e.target.result.split(',')[1]; saveState('checkin_photos_draft', p); renderCheckinPage(); }; r.readAsDataURL(f); }
@@ -415,15 +551,27 @@ function renderStatsPage() {
   const bfp = rc.map(c=>c.bf).filter(Boolean);
   const rp  = rc.filter(c=>c.shoulders&&c.waist).map(c=>parseFloat((c.shoulders/c.waist).toFixed(3)));
 
+  const streak = calcStreak();
+  const proj = calcProjectedDate();
   let html = `
   <div class="card">
     <div class="card-title">Monthly Summary <span class="badge-sm badge-navy">${new Date().toLocaleDateString('en-US',{month:'long'})}</span></div>
-    <div class="kpi-grid" style="margin-bottom:0">
+    <div class="kpi-grid" style="margin-bottom:${proj?'12px':'0'}">
       <div class="kpi-tile"><div class="big ${avgC>=80?'green':avgC>=60?'amber':'red'}">${avgC}<span style="font-size:14px;color:var(--faint)">%</span></div><div class="lbl">Avg Compliance</div></div>
       <div class="kpi-tile"><div class="big gold" style="font-size:16px">${best.label||'—'}</div><div class="lbl">Best Week (${best.pct}%)</div></div>
       <div class="kpi-tile"><div class="big amber" style="font-size:16px">${worst.label||'—'}</div><div class="lbl">Needs Work</div></div>
-      <div class="kpi-tile"><div class="big gold">${weeklyData[weeklyData.length-1]?.prot||0}/7</div><div class="lbl">Protein Days</div></div>
+      <div class="kpi-tile"><div class="big gold">${streak}</div><div class="lbl">Wk Streak</div></div>
     </div>
+    ${proj ? `<div style="background:var(--surface2);border-radius:12px;padding:14px;border:1px solid var(--border)">
+      <div style="font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">Projected Goal Date</div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:700;color:var(--green)">${proj.date}</div>
+          <div style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:2px">${proj.weeks} weeks to 32" waist · losing ${proj.weeklyLoss}" / week</div>
+        </div>
+        <div style="font-size:28px">🎯</div>
+      </div>
+    </div>` : `<div style="font-size:12px;color:var(--muted);padding:4px 0">Log 2+ check-ins with waist measurements to see your projected goal date.</div>`}
   </div>
 
   <div class="card">
@@ -567,6 +715,17 @@ function renderTargetsPage() {
       </div>
       <button class="save-btn btn-green" onclick="saveApiKey()">Save API Key</button>
     </div>
+    <div class="card">
+      <div class="card-title">Monday Reminder <span class="badge-sm badge-green">Notification</span></div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.7">
+        Get a notification every Monday at 7am reminding you to do your check-in. Tap once to enable — your browser will ask for permission.
+      </div>
+      <div style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:12px">
+        Status: <span style="color:${getS('notif_enabled',false)&&('Notification' in window)&&Notification.permission==='granted'?'var(--green)':'var(--amber)'}">${getS('notif_enabled',false)&&('Notification' in window)&&Notification.permission==='granted'?'Enabled ✓':'Not enabled'}</span>
+      </div>
+      <button class="save-btn btn-green" onclick="requestNotificationPermission()">Enable Monday Reminders</button>
+    </div>
+
     <div class="card">
       <div class="card-title">Goal Blueprint</div>
       ${[["Height","6'0\""],["Goal Waist",'32"'],["Goal Shoulders",'52"'],["Goal Body Fat",'9–11%'],["Adonis Ratio",'1.625'],["Program","Lifestyle Body"],["Reference","Will Smith (Focus) / MBJ (Black Panther)"]].map(([l,v])=>`<div class="target-row"><span class="t-label">${l}</span><span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--gold);font-weight:500">${v}</span></div>`).join('')}
