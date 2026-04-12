@@ -344,7 +344,7 @@ async function processScreenshots(wk, day) {
 // ── CHECK-IN PAGE ─────────────────────────────────────────────────────────────
 function renderCheckinPage() {
   const checkins = getS('checkins', []), photos = getS('checkin_photos_draft', {});
-  const scanReady = ['scale','measurements'].some(k => photos[k]);
+  const scanReady = ['scale','measurements'].some(k => photos[k] && (typeof photos[k] === 'object' ? photos[k].b64 : photos[k]));
   const lastCoachDate = getS('last_coach_date', '');
   let html = `
   <div id="coach-ready-banner" style="display:none;background:var(--green-dim);border:1px solid var(--green);border-radius:12px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:var(--green);font-weight:600;text-align:center;cursor:pointer" onclick="switchPage('coach')">
@@ -359,17 +359,17 @@ function renderCheckinPage() {
       Upload your scale screenshot and body measurement screenshot. Claude reads every number and fills your check-in automatically.
     </div>
     <div class="upload-grid" style="margin-bottom:10px">
-      <label class="upload-tile ${photos.scale?'has':''}">
+      <label class="upload-tile ${photos.scale && (typeof photos.scale==='object'?photos.scale.b64:photos.scale)?'has':''}">
         <input type="file" accept="image/*" onchange="handleCheckinScan(event,'scale')">
-        <div class="ui">⚖️</div><div class="ul">${photos.scale ? 'Scale ✓' : 'Scale Photo'}</div>
+        <div class="ui">⚖️</div><div class="ul">${photos.scale && (typeof photos.scale==='object'?photos.scale.b64:photos.scale) ? 'Scale ✓' : 'Scale Photo'}</div>
       </label>
-      <label class="upload-tile ${photos.measurements?'has':''}">
+      <label class="upload-tile ${photos.measurements && (typeof photos.measurements==='object'?photos.measurements.b64:photos.measurements)?'has':''}">
         <input type="file" accept="image/*" onchange="handleCheckinScan(event,'measurements')">
-        <div class="ui">📏</div><div class="ul">${photos.measurements ? 'Measures ✓' : 'Measurements'}</div>
+        <div class="ui">📏</div><div class="ul">${photos.measurements && (typeof photos.measurements==='object'?photos.measurements.b64:photos.measurements) ? 'Measures ✓' : 'Measurements'}</div>
       </label>
-      <label class="upload-tile ${photos.bodyfat?'has':''}">
+      <label class="upload-tile ${photos.bodyfat && (typeof photos.bodyfat==='object'?photos.bodyfat.b64:photos.bodyfat)?'has':''}">
         <input type="file" accept="image/*" onchange="handleCheckinScan(event,'bodyfat')">
-        <div class="ui">📊</div><div class="ul">${photos.bodyfat ? 'Extra ✓' : 'Extra Stats'}</div>
+        <div class="ui">📊</div><div class="ul">${photos.bodyfat && (typeof photos.bodyfat==='object'?photos.bodyfat.b64:photos.bodyfat) ? 'Extra ✓' : 'Extra Stats'}</div>
       </label>
     </div>
     <button class="proc-btn" id="scan-btn" onclick="runCheckinScan()" ${!scanReady?'disabled':''}>
@@ -462,7 +462,20 @@ function openPhotoCompare(idx) { saveState('compare_idx', idx); renderCheckinPag
 function closeCompare() { saveState('compare_idx', null); renderCheckinPage(); 
 }
 
-function handleCheckinScan(ev, slot) { const f = ev.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = e => { const p = getS('checkin_photos_draft', {}); p[slot] = e.target.result.split(',')[1]; saveState('checkin_photos_draft', p); renderCheckinPage(); }; r.readAsDataURL(f); }
+function handleCheckinScan(ev, slot) {
+  const f = ev.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    const dataUrl = e.target.result;
+    const mime = dataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+    const b64 = dataUrl.split(',')[1];
+    const p = getS('checkin_photos_draft', {});
+    p[slot] = { b64, mime };
+    saveState('checkin_photos_draft', p);
+    renderCheckinPage();
+  };
+  r.readAsDataURL(f);
+}
 function handleProgressPhoto(ev, slot) { const f = ev.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = e => { const p = getS('checkin_photos_draft', {}); p[slot] = e.target.result; saveState('checkin_photos_draft', p); renderCheckinPage(); }; r.readAsDataURL(f); }
 
 async function runCheckinScan() {
@@ -471,7 +484,16 @@ async function runCheckinScan() {
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Reading your stats…';
   out.className = 'ai-out show'; out.textContent = 'Scanning…';
   const content = [];
-  ['scale','measurements','bodyfat'].forEach(type => { if (photos[type]) { content.push({type:'text',text:`Image: ${type}`}); content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:photos[type]}}); } });
+  ['scale','measurements','bodyfat'].forEach(type => {
+    if (photos[type]) {
+      const img = photos[type];
+      // Handle both new {b64, mime} format and legacy string format
+      const b64 = typeof img === 'object' ? img.b64 : img;
+      const mime = typeof img === 'object' ? img.mime : 'image/jpeg';
+      content.push({type:'text', text:`Image: ${type}`});
+      content.push({type:'image', source:{type:'base64', media_type: mime, data: b64}});
+    }
+  });
   content.push({type:'text',text:`Read all fitness measurement data from these screenshots. The scale app shows weight, body fat %, skeletal muscle %, muscle mass, BMR, visceral fat, etc. The measurements app shows waist, shoulder, chest, hips, abdomen, neck, arms, thighs, calves. Extract every visible number and output ONLY:\n\nWEIGHT: [number] lbs\nBODY_FAT: [number] %\nWAIST: [number] in\nSHOULDERS: [number] in\nCHEST: [number] in\nNECK: [number] in\nARMS: [number] in\nFOREARMS: [number] in\nABDOMEN: [number] in\nHIPS: [number] in\nTHIGHS: [number] in\nCALVES: [number] in\n\nFor bilateral measurements (left/right) use the average. Skip fields not visible. Then: SUMMARY: [one line of what you found]`});
   try {
     const resp = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ messages:[{role:'user',content}] }) });
