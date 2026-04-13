@@ -286,7 +286,11 @@ function renderWeekPage() {
   document.getElementById('page-week').innerHTML = html;
 }
 
-function toggleDay(day) { const wk = weekKey(weekOffset), k = wk+'|'+day; openDays[k] = !openDays[k]; document.getElementById('body-'+day)?.classList.toggle('open', openDays[k]); }
+function toggleDay(day) {
+  const wk = weekKey(weekOffset), k = wk+'|'+day, isOpen = openDays[k];
+  DAYS.forEach(d => { openDays[wk+'|'+d] = false; document.getElementById('body-'+d)?.classList.remove('open'); });
+  if (!isOpen) { openDays[k] = true; document.getElementById('body-'+day)?.classList.add('open'); }
+}
 function toggleKPI(wk, day, id) { const s = getS('checks_'+wk, {}); s[sk(wk,day,id)] = !s[sk(wk,day,id)]; saveState('checks_'+wk, s); renderWeekPage(); }
 function addLift(wk, day) { const ex = document.getElementById('lex-'+day)?.value.trim(); if (!ex) return; const l = getS('lifts_'+wk+'_'+day, []); l.push({ ex, sets: document.getElementById('lsets-'+day)?.value.trim()||'—', wt: document.getElementById('lwt-'+day)?.value.trim()||'—' }); saveState('lifts_'+wk+'_'+day, l); renderWeekPage(); }
 function deleteLift(wk, day, i) { const l = getS('lifts_'+wk+'_'+day, []); l.splice(i, 1); saveState('lifts_'+wk+'_'+day, l); renderWeekPage(); }
