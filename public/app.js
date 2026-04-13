@@ -296,9 +296,27 @@ function addLift(wk, day) { const ex = document.getElementById('lex-'+day)?.valu
 function deleteLift(wk, day, i) { const l = getS('lifts_'+wk+'_'+day, []); l.splice(i, 1); saveState('lifts_'+wk+'_'+day, l); renderWeekPage(); }
 function handleUpload(ev, wk, day, type) {
   const f = ev.target.files[0]; if (!f) return;
-  const r = new FileReader();
-  r.onload = e => { const u = getS('uploads_'+wk+'_'+day, {}); u[type] = { b64: e.target.result.split(',')[1], mime: f.type }; saveState('uploads_'+wk+'_'+day, u); renderWeekPage(); setTimeout(() => { openDays[wk+'|'+day] = true; renderWeekPage(); }, 50); };
-  r.readAsDataURL(f);
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1200;
+      let w = img.width, h = img.height;
+      if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
+      else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const b64 = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
+      const u = getS('uploads_'+wk+'_'+day, {});
+      u[type] = { b64, mime: 'image/jpeg' };
+      saveState('uploads_'+wk+'_'+day, u);
+      renderWeekPage();
+      setTimeout(() => { openDays[wk+'|'+day] = true; renderWeekPage(); }, 50);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(f);
 }
 
 async function processScreenshots(wk, day) {
@@ -447,9 +465,27 @@ function renderCheckinPage() {
 
 function handleCheckinScan(ev, slot) {
   const f = ev.target.files[0]; if (!f) return;
-  const r = new FileReader();
-  r.onload = e => { const d=e.target.result,mime=d.split(';')[0].split(':')[1]||'image/jpeg',b64=d.split(',')[1],p=getS('checkin_photos_draft',{}); p[slot]={b64,mime}; saveState('checkin_photos_draft',p); renderCheckinPage(); };
-  r.readAsDataURL(f);
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1200;
+      let w = img.width, h = img.height;
+      if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
+      else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      const b64 = dataUrl.split(',')[1];
+      const p = getS('checkin_photos_draft', {});
+      p[slot] = { b64, mime: 'image/jpeg' };
+      saveState('checkin_photos_draft', p);
+      renderCheckinPage();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(f);
 }
 function handleProgressPhoto(ev, slot) {
   const f = ev.target.files[0]; if (!f) return;
