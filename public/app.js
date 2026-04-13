@@ -451,7 +451,29 @@ function handleCheckinScan(ev, slot) {
   r.onload = e => { const d=e.target.result,mime=d.split(';')[0].split(':')[1]||'image/jpeg',b64=d.split(',')[1],p=getS('checkin_photos_draft',{}); p[slot]={b64,mime}; saveState('checkin_photos_draft',p); renderCheckinPage(); };
   r.readAsDataURL(f);
 }
-function handleProgressPhoto(ev, slot) { const f=ev.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=e=>{const p=getS('checkin_photos_draft',{}); p[slot]=e.target.result; saveState('checkin_photos_draft',p); renderCheckinPage();}; r.readAsDataURL(f); }
+function handleProgressPhoto(ev, slot) {
+  const f = ev.target.files[0]; if (!f) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 600;
+      let w = img.width, h = img.height;
+      if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
+      else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const compressed = canvas.toDataURL("image/jpeg", 0.72);
+      const p = getS("checkin_photos_draft", {});
+      p[slot] = compressed;
+      saveState("checkin_photos_draft", p);
+      renderCheckinPage();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(f);
+}
 
 async function runCheckinScan() {
   const photos = getS('checkin_photos_draft', {}), btn = document.getElementById('scan-btn'), out = document.getElementById('scan-out');
