@@ -404,7 +404,31 @@ async function processScreenshots(wk, day) {
   out.className = 'ai-out show'; out.textContent = 'Analyzing…';
   const content = [];
   Object.entries(uploads).forEach(([type, img]) => { content.push({type:'text',text:`Image: ${type}`}); content.push({type:'image',source:{type:'base64',media_type:img.mime,data:img.b64}}); });
-  content.push({type:'text',text:`Analyze these fitness screenshots for ${day}. Targets: ${tgt.cal} kcal (0–100 under = hit/GREEN, over = RED, 100+ under = AMBER), ${tgt.prot}g protein, 10,000 steps. Extract all numbers and output:\n\nKPI STATUS:\n- Calories: [found] / [target] — GREEN/AMBER/RED\n- Protein: [found]g — GREEN/RED\n- Steps: [found] — GREEN/RED\n\nVERDICTS:\nPROTEIN_HIT: true/false\nCALORIES_HIT: true/false\nSTEPS_HIT: true/false\nLIFT_LOGGED: true/false`});
+  const currentYear = new Date().getFullYear();
+  content.push({type:'text',text:`Analyze these fitness screenshots for ${day}. Today's year is ${currentYear} — if you see a date without a year or with an ambiguous year, assume it is ${currentYear}.
+
+Targets: ${tgt.cal} kcal (0–100 under = hit/GREEN, over = RED, 100+ under = AMBER), ${tgt.prot}g protein, 10,000 steps.
+
+For STEPS screenshots: Look for a large bold number followed by the word "steps" anywhere on screen. This may be from Apple Health, iPhone Health app, Fitbit, or any step counter. The number may be formatted with commas like 10,959.
+
+For MFP screenshots: Look for Protein, Carbs, Fat totals. The date shown may say "Mon, Mar 23" — always assume year is ${currentYear}.
+
+For Strong app screenshots: Look for exercise names, sets x reps x weight.
+
+Extract all numbers and output:
+
+KPI STATUS:
+- Calories: [found] / [target] — GREEN/AMBER/RED
+- Protein: [found]g — GREEN/RED  
+- Steps: [found] — GREEN/RED
+
+VERDICTS:
+PROTEIN_HIT: true/false
+CALORIES_HIT: true/false
+STEPS_HIT: true/false
+LIFT_LOGGED: true/false
+
+If an image is blurry or unreadable, output IMAGE_ERROR: true and describe what you can see.`});
   try {
     const resp = await fetch('/api/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ messages:[{role:'user',content}] }) });
     const data = await resp.json(); const text = data.content?.map(c=>c.text||'').join('') || data.error || 'No response.';
@@ -877,10 +901,11 @@ function renderBackfillPage() {
     </div>
     <div style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px;border:1px solid var(--border)">
       <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">Supported screenshots</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center">
         <div style="background:var(--surface);border-radius:10px;padding:10px 6px;border:1px solid var(--border)"><div style="font-size:18px;margin-bottom:4px">📱</div><div style="font-size:11px;color:var(--muted);font-weight:500">MFP Diary</div></div>
         <div style="background:var(--surface);border-radius:10px;padding:10px 6px;border:1px solid var(--border)"><div style="font-size:18px;margin-bottom:4px">🏋️</div><div style="font-size:11px;color:var(--muted);font-weight:500">Strong App</div></div>
         <div style="background:var(--surface);border-radius:10px;padding:10px 6px;border:1px solid var(--border)"><div style="font-size:18px;margin-bottom:4px">👟</div><div style="font-size:11px;color:var(--muted);font-weight:500">Health Steps</div></div>
+        <div style="background:var(--surface);border-radius:10px;padding:10px 6px;border:1px solid var(--border)"><div style="font-size:18px;margin-bottom:4px">⚖️</div><div style="font-size:11px;color:var(--muted);font-weight:500">Scale / Measurements</div></div>
       </div>
     </div>
     <label class="upload-tile" style="display:block;padding:20px;text-align:center;margin-bottom:10px;border-radius:12px">
@@ -976,16 +1001,20 @@ async function runBackfill() {
 
 This could be a MyFitnessPal food diary, a Strong app workout log, or an iPhone Health app steps screenshot.
 
-STEP 1 — Identify the date shown in the screenshot. Look for any date label, header, or timestamp.
+Today's year is ${new Date().getFullYear()}. When reading dates from screenshots, ALWAYS assume the year is ${new Date().getFullYear()} unless a different year is clearly and explicitly shown.
+
+STEP 1 — Identify the date shown in the screenshot. Look for any date label, header, or timestamp. Common formats: "Mon, Mar 23", "Monday, Mar 23 2026", "3/23/26", "March 23rd". If you see a date like "Mon, Mar 23" with no year, use ${new Date().getFullYear()}.
 Output: DATE_FOUND: [YYYY-MM-DD] or DATE_FOUND: unknown
 
 STEP 2 — Identify the type of data:
 Output: DATA_TYPE: mfp OR strong OR steps OR unknown
 
 STEP 3 — Extract the data:
-For MFP: CALORIES: [number] PROTEIN: [number]g CARBS: [number]g FAT: [number]g
-For Strong: WORKOUT_LOGGED: true EXERCISES: [comma separated list of exercise names]
-For Steps: STEPS: [number]
+For MFP (MyFitnessPal): CALORIES: [number] PROTEIN: [number]g CARBS: [number]g FAT: [number]g
+For Strong app: WORKOUT_LOGGED: true EXERCISES: [comma separated list of exercise names]
+For Steps (Apple Health, Fitbit, any step counter): STEPS: [number — look for large bold number followed by the word "steps"]
+For Scale/Weight app: WEIGHT: [number in lbs or kg — specify unit] BODY_FAT: [percentage if shown]
+For Body measurements app or tape measure log: WAIST: [number]in SHOULDERS: [number]in CHEST: [number]in ARMS: [number]in NECK: [number]in THIGHS: [number]in CALVES: [number]in HIPS: [number]in (only include what is visible)
 
 STEP 4 — One line summary of what you found.
 SUMMARY: [text]
@@ -1057,6 +1086,30 @@ Be precise. If you cannot find a date, output DATE_FOUND: unknown.` }
           const steps = parseInt(stepsMatch[1].replace(',',''));
           if (steps >= 10000) { state[sk(wk,dayName,'steps')] = true; logged.push('steps ✓'); }
           aiSt.steps = { cls: steps>=10000?'ok':'bad', val: steps.toLocaleString() };
+        }
+      } else if (dataType === 'scale' || text.match(/WEIGHT:\s*[\d.]+/i) || text.match(/WAIST:\s*[\d.]+/i)) {
+        // Scale or body measurements — log to the nearest Monday check-in
+        const checkins = getS('checkins', []);
+        const entry = { date: dateLabel };
+        const wMatch = text.match(/WEIGHT:\s*([\d.]+)\s*(lbs?|kg)/i);
+        if (wMatch) {
+          let w = parseFloat(wMatch[1]);
+          if (wMatch[2].toLowerCase().startsWith('kg')) w = Math.round(w * 2.205 * 10) / 10;
+          entry.weight = w; logged.push('weight ✓');
+        }
+        const bfMatch = text.match(/BODY_FAT:\s*([\d.]+)/i);
+        if (bfMatch) { entry.bf = parseFloat(bfMatch[1]); logged.push('body fat ✓'); }
+        const fields = ['waist','shoulders','chest','arms','neck','thighs','calves','hips','abdomen','forearms'];
+        fields.forEach(f => {
+          const m = text.match(new RegExp(f+':\\s*([\\d.]+)','i'));
+          if (m) { entry[f] = parseFloat(m[1]); logged.push(f+' ✓'); }
+        });
+        if (Object.keys(entry).length > 1) {
+          // Find if there's already a check-in for this date and update it, else insert
+          const existing = checkins.findIndex(c => c.date && c.date.includes(imgDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})));
+          if (existing >= 0) { checkins[existing] = { ...checkins[existing], ...entry }; }
+          else { checkins.unshift(entry); checkins.sort((a,b) => new Date(b.date) - new Date(a.date)); }
+          saveState('checkins', checkins);
         }
       }
 
